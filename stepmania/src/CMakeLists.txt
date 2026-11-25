@@ -567,7 +567,11 @@ else() # Unix / Linux TODO: Remember to find and locate the zip archive files.
     if(WITH_SYSTEM_FFMPEG)
       list(APPEND SMDATA_LINK_LIB
                   "${FFMPEG_avformat_LIBRARY}"
-                  "${FFMPEG_avcodec_LIBRARY}"
+                  "${FFMPEG_avcodec_LIBRARY}")
+      if(SWITCH_LIBNX)
+        list(APPEND SMDATA_LINK_LIB "dav1d")
+      endif()
+      list(APPEND SMDATA_LINK_LIB
                   "${FFMPEG_swscale_LIBRARY}"
                   "${FFMPEG_avutil_LIBRARY}")
     else()
