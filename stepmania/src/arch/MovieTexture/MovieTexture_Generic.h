@@ -2,6 +2,7 @@
 #define RAGE_MOVIE_TEXTURE_GENERIC_H
 
 #include "MovieTexture.h"
+#include "RageThreads.h"
 
 class FFMpeg_Helper;
 struct RageSurface;
@@ -91,7 +92,7 @@ public:
 
 	virtual void SetPosition( float fSeconds );
 	virtual void DecodeSeconds( float fSeconds );
-	virtual void SetPlaybackRate( float fRate ) { m_fRate = fRate; }
+	virtual void SetPlaybackRate( float fRate );
 	void SetLooping( bool bLooping=true ) { m_bLoop = bLooping; }
 	uintptr_t GetTexHandle() const;
 
@@ -116,6 +117,7 @@ private:
 	Sprite *m_pSprite;
 
 	RageSurface *m_pSurface;
+	RageSurface *m_pDecodeSurface;
 
 	RageTextureLock *m_pTextureLock;
 
@@ -123,13 +125,31 @@ private:
 	float m_fClock;
 	bool m_bFrameSkipMode;
 
+	bool m_bThreaded;
+	bool m_bQuitThread;
+	bool m_bThreadWantRewind;
+	bool m_bThreadEOF;
+	bool m_bFrameReady;
+	bool m_bLoopResetPending;
+	float m_fLoopResetDelay;
+	float m_fTargetClock;
+	float m_fDecodedTimestamp;
+	float m_fDecodedFrameDelay;
+	float m_fLastDisplayedTimestamp;
+	RageThread m_DecodeThread;
+	RageEvent m_DecodeEvent;
+
 	void UpdateFrame();
+	void UploadFrame();
 
 	void CreateTexture();
 	void DestroyTexture();
 
 	bool DecodeFrame();
 	float CheckFrameTime();
+
+	void DecoderThread();
+	static int DecoderThread_start( void *p );
 };
 
 #endif

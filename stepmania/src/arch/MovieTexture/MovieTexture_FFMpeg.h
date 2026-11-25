@@ -10,6 +10,7 @@ namespace avcodec
 {
 	extern "C"
 	{
+		#include <libavcodec/avcodec.h>
 		#include <libavformat/avformat.h>
 		#include <libswscale/swscale.h>
 		#include <libavutil/pixdesc.h>
@@ -31,8 +32,13 @@ namespace avcodec
 	}
 };
 
+#if defined(__SWITCH__)
+#define STEPMANIA_FFMPEG_BUFFER_SIZE 65536
+static const int sws_flags = SWS_FAST_BILINEAR;
+#else
 #define STEPMANIA_FFMPEG_BUFFER_SIZE 4096
 static const int sws_flags = SWS_BICUBIC; // XXX: Reasonable default?
+#endif
 
 class MovieTexture_FFMpeg: public MovieTexture_Generic
 {
@@ -73,6 +79,7 @@ public:
 
 private:
 	void Init();
+	void ResetDecoderState();
 	RString OpenCodec();
 	int ReadPacket();
 	int DecodePacket( float fTargetTime );
@@ -95,6 +102,7 @@ private:
 	avcodec::AVPacket m_Packet;
 	int m_iCurrentPacketOffset;
 	float m_fLastFrame;
+	bool m_bFlushed;
 
 	/* 0 = no EOF
 	 * 1 = EOF from ReadPacket
