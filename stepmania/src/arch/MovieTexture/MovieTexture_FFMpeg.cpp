@@ -147,6 +147,8 @@ void MovieDecoder_FFMpeg::ResetDecoderState()
 	if( m_pStreamCodec != nullptr )
 		m_pStreamCodec->skip_frame = avcodec::AVDISCARD_DEFAULT;
 #endif
+	if( m_Frame != nullptr )
+		avcodec::av_frame_unref( m_Frame );
 }
 
 void MovieDecoder_FFMpeg::Init()
@@ -162,18 +164,24 @@ void MovieDecoder_FFMpeg::Init()
 	// reallocates the buffer to change the size, and in that case our m_buffer
 	// pointer is freed already, so we instead check m_avioContext->buffer
 	// to free m_buffer
-	if (m_avioContext && m_avioContext->buffer != NULL) {
-		avcodec::av_free(m_avioContext->buffer);
+	if (m_avioContext != nullptr)
+	{
+		if (m_avioContext->buffer != NULL)
+			avcodec::av_freep(&m_avioContext->buffer);
+		RageFile *file = (RageFile *)m_avioContext->opaque;
+		if (file != nullptr)
+		{
+			file->Close();
+			delete file;
+		}
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+		avcodec::avio_context_free(&m_avioContext);
+#else
+		avcodec::av_free(m_avioContext);
+		m_avioContext = NULL;
+#endif
 	}
 	m_buffer = NULL;
-    if (m_avioContext != nullptr )
-    {
-        RageFile *file = (RageFile *)m_avioContext->opaque;
-        file->Close();
-        delete file;
-        avcodec::av_free(m_avioContext);
-    }
-	m_avioContext = NULL;
 #if LIBAVCODEC_VERSION_MAJOR >= 58
 	if ( m_pStreamCodec != nullptr)
 	{
@@ -185,14 +193,14 @@ void MovieDecoder_FFMpeg::Init()
 /* Read until we get a frame, EOF or error.  Return -1 on error, 0 on EOF, 1 if we have a frame. */
 int MovieDecoder_FFMpeg::DecodeFrame( float fTargetTime )
 {
-	//hack to filter out stuttering
-	if(fTargetTime<m_fLastFrame)
+	// Only enforce monotonic target time while actively catching up (>= 0),
+	// so passing -1 to resume normal decoding is never clamped to m_fLastFrame.
+	if( fTargetTime >= 0.0f )
 	{
-		fTargetTime=m_fLastFrame;
-	}
-	else
-	{
-		m_fLastFrame=fTargetTime;
+		if( fTargetTime < m_fLastFrame )
+			fTargetTime = m_fLastFrame;
+		else
+			m_fLastFrame = fTargetTime;
 	}
 
 	for(;;)
@@ -354,6 +362,16 @@ int MovieDecoder_FFMpeg::DecodePacket( float fTargetTime )
 		if( recvRet < 0 )
 		{
 			LOG->Warn("avcodec_receive_frame: %i", recvRet);
+			avcodec::av_frame_unref(m_Frame);
+			if( recvRet == AVERROR_INVALIDDATA )
+			{
+				if( m_iEOF == 1 )
+				{
+					m_iEOF = 2;
+					return 0;
+				}
+				continue;
+			}
 			return -1;
 		}
 #endif
@@ -518,11 +536,19 @@ RString MovieDecoder_FFMpeg::Open( RString sFile )
 	m_fctx->pb = m_avioContext;
 	int ret = avcodec::avformat_open_input( &m_fctx, sFile.c_str(), nullptr, nullptr );
 	if( ret < 0 )
-		return RString( averr_ssprintf(ret, "AVCodec: Couldn't open \"%s\"", sFile.c_str()) );
+	{
+		RString sError = averr_ssprintf(ret, "AVCodec: Couldn't open \"%s\"", sFile.c_str());
+		Close();
+		return sError;
+	}
 
 	ret = avcodec::avformat_find_stream_info( m_fctx, nullptr );
 	if( ret < 0 )
-		return RString( averr_ssprintf(ret, "AVCodec (%s): Couldn't find codec parameters", sFile.c_str()) );
+	{
+		RString sError = averr_ssprintf(ret, "AVCodec (%s): Couldn't find codec parameters", sFile.c_str());
+		Close();
+		return sError;
+	}
 
 	int stream_idx = avcodec::av_find_best_stream( m_fctx, avcodec::AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0 );
 	if ( stream_idx < 0 ||
@@ -578,9 +604,9 @@ RString MovieDecoder_FFMpeg::OpenCodec()
 	m_pStreamCodec->idct_algo         = FF_IDCT_AUTO;
 	m_pStreamCodec->error_concealment = 3;
 #if defined(__SWITCH__)
-	// Switch exposes 3 app cores; 2 decode threads leave headroom for main/audio threads.
-	m_pStreamCodec->thread_count      = 2;
-	m_pStreamCodec->thread_type       = FF_THREAD_FRAME | FF_THREAD_SLICE;
+	// Force single-threaded avcodec on Switch to prevent internal worker-thread
+	// teardown deadlocks when rapidly loading/unloading animated banners.
+	m_pStreamCodec->thread_count      = 1;
 #endif
 
 #if LIBAVCODEC_VERSION_MAJOR < 58
@@ -619,7 +645,8 @@ void MovieDecoder_FFMpeg::Close()
 
 void MovieDecoder_FFMpeg::Rewind()
 {
-	avcodec::av_seek_frame( m_fctx, -1, 0, AVSEEK_FLAG_BACKWARD );
+	const int iStreamIndex = m_pStream ? m_pStream->index : -1;
+	avcodec::av_seek_frame( m_fctx, iStreamIndex, 0, AVSEEK_FLAG_BACKWARD );
 	if( m_pStreamCodec && m_pStreamCodec->codec )
 	{
 		ResetDecoderState();
