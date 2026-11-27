@@ -93,7 +93,7 @@ public:
 	virtual void SetPosition( float fSeconds );
 	virtual void DecodeSeconds( float fSeconds );
 	virtual void SetPlaybackRate( float fRate );
-	void SetLooping( bool bLooping=true ) { m_bLoop = bLooping; }
+	void SetLooping( bool bLooping=true );
 	uintptr_t GetTexHandle() const;
 
 	static EffectMode GetEffectMode( MovieDecoderPixelFormatYCbCr fmt );

@@ -488,11 +488,7 @@ void MovieTexture_Generic::DecoderThread()
 			continue;
 		}
 
-		const float fMinFrameWindow = max( m_fDecodedFrameDelay, 1.0f / 60.0f );
-		const bool bQueuedFrameStillCurrent =
-			m_bFrameReady &&
-			(m_fRate == 0 || m_fTargetClock <= m_fDecodedTimestamp + fMinFrameWindow);
-		if( m_bThreadEOF || m_bLoopResetPending || bQueuedFrameStillCurrent )
+		if( m_bThreadEOF || m_bLoopResetPending || m_bFrameReady )
 		{
 			m_DecodeEvent.Wait();
 			continue;
@@ -500,8 +496,6 @@ void MovieTexture_Generic::DecoderThread()
 
 		float fTargetTime = -1;
 		if( m_bFrameSkipMode && m_fTargetClock > m_pDecoder->GetTimestamp() )
-			fTargetTime = m_fTargetClock;
-		else if( m_bFrameReady && m_fTargetClock > m_fDecodedTimestamp + fMinFrameWindow )
 			fTargetTime = m_fTargetClock;
 
 		const bool bLoop = m_bLoop;
@@ -745,6 +739,20 @@ void MovieTexture_Generic::SetPlaybackRate( float fRate )
 	else
 	{
 		m_fRate = fRate;
+	}
+}
+
+void MovieTexture_Generic::SetLooping( bool bLooping )
+{
+	if( m_bThreaded )
+	{
+		LockMut( m_DecodeEvent );
+		m_bLoop = bLooping;
+		m_DecodeEvent.Signal();
+	}
+	else
+	{
+		m_bLoop = bLooping;
 	}
 }
 

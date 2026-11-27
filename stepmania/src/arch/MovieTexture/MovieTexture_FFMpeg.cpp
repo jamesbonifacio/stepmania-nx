@@ -117,6 +117,7 @@ MovieDecoder_FFMpeg::MovieDecoder_FFMpeg()
 	m_pStreamCodec = nullptr;
 	m_iCurrentPacketOffset = -1;
 	m_bFlushed = false;
+	ZERO( m_Packet );
 	m_Frame = avcodec::av_frame_alloc();
 
 	Init();
@@ -492,16 +493,25 @@ void MovieTexture_FFMpeg::RegisterProtocols()
 
 static int AVIORageFile_ReadPacket( void *opaque, uint8_t *buf, int buf_size )
 {
-    RageFile *f = (RageFile *)opaque;
-    return f->Read( buf, buf_size );
+	RageFile *f = (RageFile *)opaque;
+	int ret = f->Read( buf, buf_size );
+	// FFmpeg 61 requires read_packet to return AVERROR_EOF / AVERROR rather than 0 on EOF.
+	if( ret == 0 )
+		return AVERROR_EOF;
+	if( ret < 0 )
+		return AVERROR(EIO);
+	return ret;
 }
 
 static int64_t AVIORageFile_Seek( void *opaque, int64_t offset, int whence )
 {
-    RageFile *f = (RageFile *)opaque;
-    if( whence == AVSEEK_SIZE )
+	RageFile *f = (RageFile *)opaque;
+	if( whence == AVSEEK_SIZE )
 		return f->GetFileSize();
 
+#ifdef AVSEEK_FORCE
+	whence &= ~AVSEEK_FORCE;
+#endif
 	if( whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END )
 	{
 		LOG->Trace("Error: unsupported seek whence: %d", whence);
